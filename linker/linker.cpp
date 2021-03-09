@@ -145,6 +145,11 @@ static bool is_system_library(const std::string& realpath) {
   return false;
 }
 
+static bool is_from_llvm(const std::string& realpath) {
+  return ((realpath.rfind("/apex/com.android.runtime", 0) == 0) ||
+      (realpath.rfind("/data/misc/profiles/llvm/", 0) == 0));
+}
+
 // Checks if the file exists and not a directory.
 static bool file_exists(const char* path) {
   struct stat s;
@@ -1326,26 +1331,30 @@ static bool load_library(android_namespace_t* ns,
       if (needed_by == nullptr || !is_system_library(needed_by->get_realpath())) {
         const soinfo* needed_or_dlopened_by = task->get_needed_by();
         const char* sopath = needed_or_dlopened_by == nullptr ? "(unknown)" :
-                                                      needed_or_dlopened_by->get_realpath();
+          needed_or_dlopened_by->get_realpath();
         DL_WARN_documented_change(__ANDROID_API_N__,
-                                  "private-api-enforced-for-api-level-24",
-                                  "library \"%s\" (\"%s\") needed or dlopened by \"%s\" "
-                                  "is not accessible by namespace \"%s\"",
-                                  name, realpath.c_str(), sopath, ns->get_name());
+            "private-api-enforced-for-api-level-24",
+            "library \"%s\" (\"%s\") needed or dlopened by \"%s\" "
+            "is not accessible by namespace \"%s\"",
+            name, realpath.c_str(), sopath, ns->get_name());
         add_dlwarning(sopath, "unauthorized access to",  name);
       }
     } else {
       // do not load libraries if they are not accessible for the specified namespace.
       const char* needed_or_dlopened_by = task->get_needed_by() == nullptr ?
-                                          "(unknown)" :
-                                          task->get_needed_by()->get_realpath();
+        "(unknown)" :
+        task->get_needed_by()->get_realpath();
 
-      DL_ERR("library \"%s\" needed or dlopened by \"%s\" is not accessible for the namespace \"%s\"",
-             name, needed_or_dlopened_by, ns->get_name());
+      if(is_from_llvm(needed_or_dlopened_by)) {
+        // DL_WARN("library \"%s\" needed or dlopened by LLVM: \"%s\" is not accessible for the namespace \"%s\"",
+        //     name, needed_or_dlopened_by, ns->get_name());
+      } else {
+        DL_ERR("library \"%s\" needed or dlopened by \"%s\" is not accessible for the namespace \"%s\"",
+            name, needed_or_dlopened_by, ns->get_name());
 
-      // do not print this if a library is in the list of shared libraries for linked namespaces
-      if (!maybe_accessible_via_namespace_links(ns, name)) {
-        PRINT("library \"%s\" (\"%s\") needed or dlopened by \"%s\" is not accessible for the"
+        // do not print this if a library is in the list of shared libraries for linked namespaces
+        if (!maybe_accessible_via_namespace_links(ns, name)) {
+          PRINT("library \"%s\" (\"%s\") needed or dlopened by \"%s\" is not accessible for the"
               " namespace: [name=\"%s\", ld_library_paths=\"%s\", default_library_paths=\"%s\","
               " permitted_paths=\"%s\"]",
               name, realpath.c_str(),
@@ -1354,8 +1363,9 @@ static bool load_library(android_namespace_t* ns,
               android::base::Join(ns->get_ld_library_paths(), ':').c_str(),
               android::base::Join(ns->get_default_library_paths(), ':').c_str(),
               android::base::Join(ns->get_permitted_paths(), ':').c_str());
+        }
+        return false;
       }
-      return false;
     }
   }
 
